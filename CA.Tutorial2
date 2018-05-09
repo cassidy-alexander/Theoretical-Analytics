@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Apr 15 22:20:31 2018
+
+@author: Cassidy
+"""
+
+import numpy as np
+from collections import namedtuple
+import sys
+
+'''Define initial functions'''
+
+def rlu(x):
+    return max([0,x])    
+def rluP(x):
+    return int(x > 0) 
+
+
+    
+def augment(X, value):
+    n, _ = np.shape(X)
+    return np.hstack((value*np.ones(shape= (n,1)), X ))    
+
+def dim(X):
+    return np.shape(X)
+
+
+def getCVsample(D, sampleID, k):
+    cvData = namedtuple('data','X Y')
+    cvPartition = namedtuple('data', 'R E')
+    n = len(sampleID)
+    sIndex = [i for i in range(n) if sampleID[i] == k]
+    rIndex = [i for i in range(n) if i not in sIndex]
+    split = cvPartition(cvData(D.X[rIndex,:], D.Y[rIndex,:]), cvData(D.X[sIndex,:], D.Y[sIndex,:]) )
+    return split    
+
+   
+def parkinsonsData(path):
+    
+    dataSet = namedtuple('data','X Y meanY stdY labels')
+    records =  open(path,'r').read().split('\n')
+    variables = records[0].split(',')
+    
+    iX = [1,2,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]
+    iY = [4, 5]
+    
+    print('Predictor variables:')    
+    for i in range(len(iX)) : 
+        print(iX[i], variables[iX[i]])
+    print('Target variables:')    
+    for i in range(len(iY)) : 
+        print(iY[i], variables[iY[i]])
+        
+    n = len(records)-1
+    p = len(iX) + 1
+    try:
+        s = len(iY)
+    except(TypeError):
+        s = 1
+    
+    Y = np.matrix(np.zeros(shape = (n, s)))
+    X = np.matrix(np.ones(shape = (n, p )))
+    for i, j in enumerate(np.arange(1,n+1,1)):
+        lst = records[j].split(',')
+        for k in range(s):
+            Y[i,k] = float(lst[iY[k]])
+        for k in range(p-1):
+            X[i,k+1] = lst[iX[k]]    
+    
+    s = np.std(Y, axis=0)            
+    m = np.mean(Y, axis = 0)    
+    Y = (Y - m)/s
+    
+    X[:,1:] = (X[:,1:] - np.mean(X[:,1:], axis=0)) / np.std(X[:,1:], axis=0)            
+
+    data = dataSet(X, Y, m, s, None)
+    return data
+    
+def breastCancerData(path):
+    dataSet = namedtuple('data','X Y meanY stdY labels')
+    f = open(path,'r')
+    data = f.read()
+    f.close()
+    records = data.split('\n')
+
+    n = len(records)-1
+    p = len(records[0].split(','))-1
+    s = 2 # number of classes
+    Y = np.matrix(np.zeros(shape = (n, s)))
+    X = np.matrix(np.ones(shape = (n, p)))
+    labels = [0]*n
+    for i, line in enumerate(records):
+        record = line.split(',')
+        
+        try:
+            labels[i] = int(record[p+1]=='4')
+            Y[i,labels[i]] = 1
+            X[i,1:] =  [int(x)/10 for x  in record[1:p+1]]
+
+        except(ValueError,IndexError):
+            pass    
+    s = np.std(Y, axis=0)            
+    m = np.mean(Y, axis = 0)    
+    data = dataSet(X, Y, m, s, [np.argmax(Y[i,:]) for i in range(n)]) 
+
+    return data
+
+
+def BostonHousing(path):
+    #https://archive.ics.uci.edu/ml/datasets/housing
+    dataSet = namedtuple('data','X Y meanY stdY labels')
+    p = 13 + 1
+    f = open(path,'r')
+    D = f.read()
+    records = D.split('\n')
+    n = len(records) - 1
+    Y = np.matrix(np.zeros(shape = (n,1)))
+    X = np.matrix(np.ones(shape = (n,p)))
+    
+    endCol = [8,15,23,26,34,43,49,57,61,68,75,82,89,96]
+    startCol = [0] + [col+1 for col in endCol[0:13]]
+    
+    for i, record in enumerate(records):
+        
+    
+        try:
+            for j, pair in enumerate(zip(startCol, endCol)):
+                
+                string = record[pair[0]:pair[1]]
+                try:
+                    X[i,j+1] = float(string)
+                    #print(i,X[i,j+1] )
+                except(IndexError):
+                    Y[i] = float(string)
+        except(ValueError):
+            pass
+            
+    s = np.std(Y, axis=0)            
+    m = np.mean(Y, axis = 0)    
+    Y = (Y - m)/s
+    
+    X[:,1:] = (X[:,1:] - np.mean(X[:,1:], axis=0)) / np.std(X[:,1:], axis=0) 
+     
+    data =  dataSet(X, Y, m, s, None)
+    return data
+
+    
+def rSqr(Y, E):
+    varY = np.var(Y, axis = 0)
+    varE = np.var(E, axis = 0)
+    lst = np.matrix.tolist(1 - varE/varY)[0]
+
+    return [round(float(r),4) for r in  lst]
+
+'''End of initial functions'''
+#Create initialize function for fitting and using NN
+def initialize(g, X, fns, dfns):
+    initialVars = namedtuple('variables','yHat xList hList gList zpList')
+    ''' Includes bias units '''
+    a = .1
+    xList = []
+    hList = []
+    gList = []
+    zpList = []
+    Xr = X.copy()
+    m = len(g) - 1
+    for r in range(m):
+        xList.extend([Xr])
+
+        if r > 0:
+            shape = g[r] + 1, g[r+1]
+            A = augment(Xr,0)
+        else:
+            shape = g[r], g[r+1]
+            A = Xr
+        H = np.matrix(np.random.uniform(-a, a, shape ))
+        hList.extend([H])
+        gList.extend([a * np.matrix(np.ones(shape))])
+        AH = A * H
+        zpList.extend([ dfns[r](AH) ])
+        Xr = fns[r](AH)
+    initialList = initialVars(Xr, xList, hList, gList, zpList)
+    return initialList
+
+class ActivationFunction(object):
+    def __init__(self, function, derivative):    
+        self.function = function
+        self.derivative = derivative
+            
+    def differentiate(self, X):
+        shape = np.shape(X)
+        A = np.matrix(np.zeros(shape))
+        for i in range(shape[0]):    
+            for j in range(shape[1]):  
+                A[i,j] = self.derivative(X[i,j])
+        return A
+    
+    def evaluate(self, X):
+        shape = np.shape(X)
+        A = np.matrix(np.zeros(shape))
+        for i in range(shape[0]):    
+            for j in range(shape[1]):  
+                A[i,j] = self.function(X[i,j])
+        return A
+
+
+
+
+
+
+
+
+
+
+
+
+''''''
+      
+
+
+path = '/Users/Cassidy/Documents/Assignments/S2018/M462/Data/parkinsons_updrs.csv' 
+D = parkinsonsData(path)
+n, p = dim(D.X)
+n, s = dim(D.Y)
+print(n, p, s)
+
+g = [p, p, s]
+
+#Identity Function
+def identity(x):
+    return(x)
+#Unit = dx(Identity Function)
+def unit(x):
+    return 1
+
+#Store activation functions in lists
+z0 = ActivationFunction(rlu, rluP)
+z1 = ActivationFunction(identity, unit)
+fns = [z0.evaluate, z1.evaluate]
+dfns = [z0.differentiate, z1.differentiate]
+
+
+def gradientComputerTwo(hList, gList, xList, zpList, dEdyhat):    
+    m = len(hList)
+    s = dim(hList[m - 1])[1]
+    for r in range(m-1, -1, -1):
+        
+        shape = dim(hList[r])
+        if r > 0:
+            A = augment(xList[r], 1)
+        else:
+            A = xList[r]
+        zeros = np.matrix(np.zeros( dim(zpList[r]) ))   
+        
+        #E = np.matrix(np.zeros( shape))       
+        for i in range(shape[0]):
+            for j in range(shape[1]):
+                #dyhatdh = np.matrix(np.zeros(dim(zpList[r])))   
+                dyhatdh = zeros.copy()   
+                dyhatdh[:,j] = np.multiply( A[:,i], zpList[r][:,j])
+                #E[i,j] = 1
+            
+                #dyhatdh = np.multiply( A*E, zpList[r])
+                
+                for k in range(r+1,m,1):
+                    
+                    dyhatdh = np.multiply(dyhatdh * hList[k][1:,:], zpList[k])
+                gList[r][i,j] =  np.sum([dyhatdh[:,k].T*dEdyhat[:,k] for k in range(s)]) 
+                
+                #E[i,j] = 0
+    return gList
+
+
+#Forward propagation function 
+def fProp(xList, hList, fns, dfns, zpList):
+    m = len(xList)
+    A = xList[0]
+    for r in range(m):
+        if r > 0:
+            A = augment(xList[r], 1)
+        AH = A * hList[r]
+        if r < m - 1:
+            xList[r+1] = fns[r](AH)
+        zpList[r] = dfns[r](AH)
+    yHat = fns[m-1](AH)
+    return xList, zpList, yHat
+
+
+
+def testAcc(testData, hList, fns):
+    m = len(hList)
+    A = testData.X
+    for r in range(m):
+        if r > 0:
+            A = augment(zAH, 1)
+        AH = A * hList[r]
+        zAH = fns[r](AH)
+    yHat = zAH
+    return rSqr(testData.Y, testData.Y - yHat)
+K = 10
+#Randomly assign each of the n training observations to one of the K subsets
+import random
+seed = 0
+random.seed(seed)
+gamma = .00001
+np.random.seed(seed)
+sampleID = [random.choice(range(K)) for i in range(n)]
+for k in range(K):
+    try:
+        del progress
+    except(NameError):
+        pass
+    F = getCVsample(D, sampleID, k)
+    print(len(F), dim(F.R.X), dim(F.R.Y))
+    X = F.R.X
+    beta = np.linalg.solve(X.T*X, X.T*F.R.Y)
+    print(beta)
+    
+    #Compute least squares and least squares adjusted
+    E = F.E.Y - F.E.X*beta
+    rsq = rSqr(F.E.Y, E)
+    print('N train = ',dim(F.R.Y)[0], '\tn test = ',dim(F.E.Y)[0],
+          'tLinear regression adj R2 (test) = ',rsq)
+    
+    yHat, xList, hList, gList, zpList = initialize(g, F.R.X, fns, dfns)
+    for it in range(1000):
+        
+        xList, zpList, yHat = fProp(xList, hList, fns, dfns, zpList)
+        dEdyhat = -2*(F.R.Y - yHat)
+        gList = gradientComputerTwo(hList, gList, xList, zpList, dEdyhat)
+        hList[0] -= gamma*gList[0]
+        #print(testAcc(F.E, hList, fns))
+        obsAcc = testAcc(F.E, hList, fns)
+        objFunction = sum([0.25* np.mean([x**2 for x in dEdyhat[:,i]]) for i in range(s)]) 
+        obsAcc.append(objFunction)
+        try:
+            progress = [.9*progress[i] + .1*obsAcc[i] for i in range(len(progress))]
+        except(NameError): 
+            progress = obsAcc
+        string = '\r'+str(k) + '/' + str(K) + ' \t' + str(it) 
+        for j in range(s):
+            string += '\t r-sqr = '+ str(round(progress[j], 3))
+        string +='\t obj = '+ str(round(progress[len(progress)-1], 5))
+        print(string, end="")
+    sys.exit()
+    
